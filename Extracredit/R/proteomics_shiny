@@ -1,0 +1,100 @@
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+data <- read.csv("proteomics.csv")
+# clean data
+data <- data %>%
+  rename(ratio = Abundance.Ratio...EtOH..Vehicle.....Control..Vehicle.) %>%
+  filter(!is.na(ratio), ratio > 0)
+
+str(data$log2FC)
+
+colnames(data)
+
+data$ratio <- gsub(",", "", data$ratio)
+data$ratio <- as.numeric(data$ratio)
+
+data <- data %>%
+  filter(!is.na(ratio), ratio > 0)
+
+data$log2FC <- log2(data$ratio)
+data$signal_strength <- abs(data$log2FC)
+
+# force ratio to numeric safely
+data$ratio <- as.character(data$ratio)
+data$ratio <- gsub(",", "", data$ratio)
+data$ratio <- trimws(data$ratio)
+data$ratio[data$ratio == ""] <- NA
+data$ratio <- as.numeric(data$ratio)
+
+# remove bad values before log2
+data <- data %>%
+  filter(!is.na(ratio), ratio > 0)
+
+# compute
+data$log2FC <- log2(data$ratio)
+
+data$log2FC <- as.numeric(data$log2FC)
+data$signal_strength <- abs(data$log2FC)
+
+class(data$log2FC)
+
+# UI
+ui <- fluidPage(
+  titlePanel("Proteomics Explorer"),
+
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("fc",
+                  "Filter log2 Fold Change:",
+                  min = floor(min(data$log2FC)),
+                  max = ceiling(max(data$log2FC)),
+                  value = c(-1, 1)),
+
+      sliderInput("topN",
+                  "Top proteins:",
+                  min = 10,
+                  max = 200,
+                  value = 50)
+    ),
+
+    mainPanel(
+      plotOutput("plot"),
+      tableOutput("table")
+    )
+  )
+)
+
+# SERVER
+server <- function(input, output) {
+
+  filtered <- reactive({
+    data %>%
+      filter(log2FC >= input$fc[1],
+             log2FC <= input$fc[2]) %>%
+      arrange(desc(abs(log2FC))) %>%
+      head(input$topN)
+  })
+
+  output$plot <- renderPlot({
+    ggplot(filtered(), aes(x = log2FC, y = signal_strength)) +
+      geom_point(size = 3, alpha = 0.7, color = "steelblue") +
+      theme_minimal(base_size = 14) +
+      labs(
+        title = "Protein Expression Changes",
+        x = "log2 Fold Change",
+        y = "Signal Strength"
+      ) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "red")
+  })
+
+  output$table <- renderTable({
+    filtered()[, c("Description", "log2FC", "signal_strength")]
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+runApp()
